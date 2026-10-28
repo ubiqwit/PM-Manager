@@ -69,6 +69,14 @@ _Avoid_: Security, guarantee
 A mortgage registered ahead of ours on the same property, which counts against the property's value when judging LTV.
 _Avoid_: First mortgage, senior debt
 
+**Valuation**:
+A dated value of a property, set by the Manager, with its basis: an appraisal, a broker's opinion, an assessment, or the Manager's own estimate. A property keeps every Valuation; the latest one counts.
+_Avoid_: Appraisal (one basis among several), appraised value
+
+**LTV**:
+Loan-to-value: a Mortgage's outstanding principal plus the Prior Charges ahead of it, over the latest Valuations of the properties securing it. Stated both on the primary property alone and with its Collateral included.
+_Avoid_: Leverage, coverage
+
 ## Money
 
 **Borrower Payment**:
