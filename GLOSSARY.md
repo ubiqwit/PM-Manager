@@ -80,8 +80,36 @@ _Avoid_: Leverage, coverage
 ## Money
 
 **Borrower Payment**:
-Money received from a Borrower on a Mortgage: interest, principal, or a Lender's Fee.
+Money received from a Borrower on a Mortgage, applied to interest, principal, a Lender's Fee or a Borrower Charge; whatever isn't applied is Unapplied.
+
+**Borrower Charge**:
+A dated amount the Borrower owes beyond interest, principal and the Lender's Fee, such as an NSF fee or a cost the Lenders paid to protect the Mortgage. It bears no interest.
+_Avoid_: Penalty, add-on, disbursement
+
+**Lender Cost**:
+A cost paid to a third party to protect a Mortgage, borne by its Lenders by Share or by named Lenders, and funded by their contributions or deducted from what they are owed.
+_Avoid_: Expense, deduction, disbursement
+
+**Unapplied**:
+Money received on a Mortgage that isn't yet applied to anything the Borrower owes, such as an overpayment, held until it is applied or refunded.
+_Avoid_: Suspense, credit balance
+
+**Arrears**:
+What a Borrower owes and hasn't paid, worked out from interest and charges due less what has been applied, and aged by the oldest unpaid month.
+_Avoid_: POS, delinquency, past due
+
+**Waiver**:
+Lenders forgiving interest or a Borrower Charge a Borrower owes, for a period or an amount, shared among them as it would have been paid.
+_Avoid_: Write-off, forgiveness
+
+**Reversal**:
+An entry that cancels an earlier entry, with a date and a reason; records are never edited or deleted. An NSF is a Reversal of a Borrower Payment.
+_Avoid_: Correction, void, adjustment
+
+**Allocation**:
+A Lender's entitlement to part of a Borrower Payment, by Share.
+_Avoid_: Distribution, split
 
 **Payout**:
-Money the Manager pays a Lender as their Share of a Borrower Payment.
+Money the Manager actually pays a Lender, settling one or more Allocations; it may be later than, or less than, what the Lender is owed.
 _Avoid_: Distribution, cash out
