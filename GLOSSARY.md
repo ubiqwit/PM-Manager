@@ -15,10 +15,14 @@ _Avoid_: Investor, shareholder, participant
 **Borrower**:
 The party a mortgage is lent to, who pays interest and repays principal.
 
+**Guarantor**:
+A person who is not the Borrower but promises to repay a Mortgage if the Borrower doesn't.
+_Avoid_: Co-signer
+
 ## Mortgages
 
 **Mortgage**:
-A simple-interest, interest-only loan to a Borrower, secured on property and funded by one or more Lenders holding Shares in it.
+A simple-interest loan to a Borrower, secured on property and funded by one or more Lenders holding Shares in it. Usually interest-only; some repay principal with interest in blended payments.
 _Avoid_: Loan, deal, file
 
 **Term**:
@@ -28,6 +32,10 @@ _Avoid_: Renewal period
 **Share**:
 The principal a single Lender has in a Mortgage; its percentage is that principal over the Mortgage's total principal.
 _Avoid_: Stake, portion, participation
+
+**Share Sale**:
+One Lender selling all or part of its Share to another Lender; the Mortgage's total principal is unchanged.
+_Avoid_: Assignment, transfer
 
 **Redemption**:
 Repayment of one Lender's Share while the Mortgage continues for the remaining Lenders.
@@ -40,6 +48,10 @@ _Avoid_: Origination fee, admin fee
 **Collateral**:
 Additional property pledged against a Mortgage beyond the primary property, carrying a value set by the Manager.
 _Avoid_: Security, guarantee
+
+**Prior Charge**:
+A mortgage registered ahead of ours on the same property, which counts against the property's value when judging LTV.
+_Avoid_: First mortgage, senior debt
 
 ## Money
 
