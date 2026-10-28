@@ -50,11 +50,11 @@ The principal a single Lender has in a Mortgage; its percentage is that principa
 _Avoid_: Stake, portion, participation
 
 **Share Sale**:
-One Lender selling all or part of its Share to another Lender; the Mortgage's total principal is unchanged.
+One Lender selling all or part of its Share to another Lender, paid with the buyer's money; the Mortgage's total principal is unchanged.
 _Avoid_: Assignment, transfer
 
 **Redemption**:
-Repayment of one Lender's Share while the Mortgage continues for the remaining Lenders.
+Repayment of all or part of one Lender's Share out of the Borrower's money, while the Mortgage continues for the remaining Lenders. Any other repayment of principal is shared among all Lenders by Share.
 _Avoid_: Transfer, buyout
 
 **Lender's Fee**:
