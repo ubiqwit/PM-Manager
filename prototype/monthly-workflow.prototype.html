@@ -1,0 +1,508 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Lives on branch prototype/monthly-workflow, never merged.
+  Question (wayfinder ticket "The Manager's monthly workflow and portfolio view"):
+    what should the monthly loop (record Borrower Payments -> review/confirm Allocations
+    and Payouts per Lender, incl. exceptions) and the portfolio view look and behave like?
+  Three structurally different variants, switchable via ?variant=A|B|C and the bottom bar (or ← →).
+    A  Month sheet      — one month-centric page: payments table, then a Payouts table; Portfolio is a dense sheet.
+    B  Pipeline         — Receive → Resolve exceptions → Pay Lenders steps, remittance slips per Lender.
+    C  Mortgage file    — master/detail: pick a Mortgage or a Lender from a sidebar, do everything in its file.
+  Assumption: no app exists yet, so this is a standalone page (double-click to open). The real app is
+  server-rendered Hono + htmx; nothing here is meant to be reused. All data is FICTIONAL. State is in memory;
+  reload resets it. Calculations follow the decided rules loosely (÷12 interest, charges→interest→fee→principal
+  waterfall, surplus Unapplied, largest-remainder split by Share, only Cleared Allocations payable).
+-->
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE · Monthly workflow</title>
+<style>
+  :root { --ink:#1d2228; --mute:#6b7280; --line:#d9dde3; --bg:#f6f7f9; --card:#fff; --accent:#1f5f8b;
+          --ok:#1e7a46; --warn:#a15c00; --bad:#b42318; --hold:#6941c6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); padding-bottom:80px; }
+  h1,h2,h3 { margin:0 0 .5em; line-height:1.2; } h1 { font-size:20px; } h2 { font-size:16px; } h3 { font-size:14px; }
+  table { border-collapse:collapse; width:100%; background:var(--card); }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { font-size:12px; color:var(--mute); font-weight:600; background:#fafbfc; white-space:nowrap; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  button { font:inherit; padding:4px 10px; border:1px solid var(--line); background:#fff; border-radius:4px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.45; cursor:default; }
+  input, select { font:inherit; padding:4px 6px; border:1px solid var(--line); border-radius:4px; }
+  input[type=number] { width:110px; text-align:right; }
+  .mute { color:var(--mute); } .small { font-size:12px; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:10px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .c-paid { background:#e3f4ea; color:var(--ok); } .c-short,.c-missing,.c-nsf { background:#fde8e6; color:var(--bad); }
+  .c-uncleared { background:#efeafd; color:var(--hold); } .c-overpaid { background:#fff1dc; color:var(--warn); }
+  .c-upcoming { background:#eef1f4; color:var(--mute); }
+  .flag { color:var(--bad); font-weight:600; } .warnc { color:var(--warn); font-weight:600; }
+  .wrap { max-width:1280px; margin:0 auto; padding:16px; }
+  .preview { margin-top:8px; padding:8px; background:#f3f6f9; border:1px dashed var(--line); border-radius:4px; font-size:13px; }
+  .preview table { background:transparent; } .preview td, .preview th { padding:2px 6px; border:0; background:transparent; }
+  .err { color:var(--bad); font-size:12px; }
+  /* switcher — deliberately not part of the design */
+  #switcher { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:99; display:flex; gap:6px; align-items:center;
+    background:#111; color:#fff; padding:6px 10px; border-radius:999px; box-shadow:0 6px 20px rgba(0,0,0,.3); font-size:13px; }
+  #switcher button { background:#333; color:#fff; border:0; border-radius:999px; padding:4px 10px; }
+  #statepanel { position:fixed; right:12px; bottom:64px; width:420px; max-height:60vh; overflow:auto; z-index:98; background:#111; color:#d6f5d6;
+    font:12px/1.4 ui-monospace, Consolas, monospace; padding:10px; border-radius:6px; white-space:pre-wrap; display:none; }
+  @media print { #switcher, #statepanel, button, .noprint, nav { display:none !important; } body { background:#fff; padding:0; } }
+
+  /* ---------- Variant A: month sheet ---------- */
+  .A header { background:#fff; border-bottom:1px solid var(--line); padding:10px 16px; display:flex; gap:24px; align-items:center; }
+  .A nav a { margin-right:14px; cursor:pointer; color:var(--mute); text-decoration:none; padding-bottom:4px; }
+  .A nav a.on { color:var(--ink); border-bottom:2px solid var(--accent); font-weight:600; }
+  .A .strip { display:flex; gap:28px; margin:4px 0 16px; flex-wrap:wrap; }
+  .A .strip div b { display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+  .A section { margin-bottom:24px; }
+  .A tr.expand td { background:#f9fafb; }
+
+  /* ---------- Variant B: pipeline ---------- */
+  .B .top { background:#1f2a37; color:#fff; padding:12px 16px; display:flex; align-items:center; gap:16px; }
+  .B .steps { display:flex; gap:0; }
+  .B .steps a { color:#c3cad3; padding:6px 14px; cursor:pointer; border:1px solid #3b4757; text-decoration:none; }
+  .B .steps a:first-child { border-radius:4px 0 0 4px; } .B .steps a:last-child { border-radius:0 4px 4px 0; }
+  .B .steps a.on { background:#fff; color:#1f2a37; font-weight:600; }
+  .B .steps a .cnt { background:var(--bad); color:#fff; border-radius:9px; padding:0 6px; font-size:11px; margin-left:4px; }
+  .B .split { display:grid; grid-template-columns: 1fr 420px; gap:16px; }
+  .B .queue div.item { background:#fff; border:1px solid var(--line); border-left:4px solid var(--line); padding:8px 10px; margin-bottom:6px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
+  .B .queue div.item.sel { outline:2px solid var(--accent); }
+  .B .queue div.item.s-paid { border-left-color:var(--ok); } .B .queue div.item.s-short,.B .queue div.item.s-missing,.B .queue div.item.s-nsf { border-left-color:var(--bad); }
+  .B .queue div.item.s-uncleared { border-left-color:var(--hold); } .B .queue div.item.s-overpaid { border-left-color:var(--warn); }
+  .B .panel { background:#fff; border:1px solid var(--line); padding:14px; position:sticky; top:12px; align-self:start; }
+  .B .bar { display:flex; height:22px; border-radius:3px; overflow:hidden; margin:6px 0; background:#eef1f4; }
+  .B .bar span { display:block; height:100%; font-size:11px; color:#fff; padding-left:4px; white-space:nowrap; overflow:hidden; }
+  .B .exc { background:#fff; border:1px solid var(--line); padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; gap:12px; align-items:center; }
+  .B .slips { display:grid; grid-template-columns: repeat(auto-fill, minmax(360px,1fr)); gap:14px; }
+  .B .slip { background:#fff; border:1px solid var(--line); padding:14px; font-size:13px; }
+  .B .slip table { font-size:13px; } .B .slip .tot td { font-weight:700; border-top:2px solid var(--ink); }
+  .B .bucket { margin-bottom:20px; }
+  .B .mrow { background:#fff; border:1px solid var(--line); padding:10px 12px; margin-bottom:6px; display:grid; grid-template-columns: 220px 1fr 260px; gap:16px; align-items:center; }
+  .B .ltvbar { position:relative; height:12px; background:#eef1f4; border-radius:2px; margin:3px 0 8px; }
+  .B .ltvbar i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:2px; }
+  .B .ltvbar i.hi { background:var(--bad); }
+  .B .ltvbar b { position:absolute; left:75%; top:-3px; bottom:-3px; width:2px; background:var(--ink); }
+
+  /* ---------- Variant C: mortgage file ---------- */
+  .C { display:grid; grid-template-columns: 300px 1fr; min-height:100vh; }
+  .C aside { background:#fff; border-right:1px solid var(--line); padding:12px; overflow:auto; max-height:100vh; position:sticky; top:0; }
+  .C aside .book { font-size:12px; background:#f3f6f9; padding:8px; border-radius:4px; margin-bottom:10px; }
+  .C aside .tog { display:flex; margin-bottom:8px; } .C aside .tog button { flex:1; border-radius:0; } .C aside .tog button.on { background:var(--ink); color:#fff; }
+  .C aside .li { padding:7px 8px; border-radius:4px; cursor:pointer; display:flex; gap:8px; align-items:flex-start; }
+  .C aside .li:hover { background:#f3f4f6; } .C aside .li.sel { background:#e6eef5; }
+  .C aside .dot { width:9px; height:9px; border-radius:50%; margin-top:5px; flex:none; }
+  .C main { padding:20px 28px; max-width:1000px; }
+  .C .facts { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin:12px 0 18px; }
+  .C .facts div { background:#fff; border:1px solid var(--line); padding:8px 10px; } .C .facts b { display:block; font-size:16px; }
+  .C .box { background:#fff; border:1px solid var(--line); padding:12px 14px; margin-bottom:14px; }
+  .C .cols { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="statepanel"></div>
+<div id="switcher" class="noprint">
+  <button id="prev" title="Previous variant (←)">◀</button>
+  <span id="vlabel"></span>
+  <button id="next" title="Next variant (→)">▶</button>
+  <button id="statebtn" title="Show the recorded entries">state</button>
+  <button id="resetbtn" title="Reset the in-memory data">reset</button>
+</div>
+<script>
+// ===================== fictional data =====================
+const TODAY = '2026-10-29', MONTH_LABEL = 'October 2026', INTEREST_FOR = 'September';
+const LENDERS = [
+  { id:'L1', name:'Northgate Capital Ltd.', note:"Manager's company" },
+  { id:'L2', name:'A. Fernandes' },
+  { id:'L3', name:'J. Okafor RRSP', note:'Self-directed, via trustee' },
+  { id:'L4', name:'Lakeshore Family Trust' },
+  { id:'L5', name:'R. Tremblay' },
+  { id:'L6', name:'Pinecrest Investments Corp.' },
+];
+const K = d => Math.round(d*100); // dollars -> cents
+const MORTGAGES = [
+  { id:'M-101', borrower:'D. & K. Halvorsen', pos:'2nd', type:'IO', rate:.095, pd:1, start:'2026-03-01', maturity:'2027-02-28',
+    shares:{L1:K(150000), L2:K(100000)}, prop:{addr:'14 Wexford Cres, Hamilton', val:K(1250000), valDate:'2025-11-12', basis:'Appraisal', prior:K(610000)}, coll:null, charges:[] },
+  { id:'M-102', borrower:'Brightline Homes Inc.', pos:'1st', type:'IO', rate:.11, pd:5, start:'2025-12-05', maturity:'2026-12-04',
+    shares:{L1:K(200000), L4:K(200000), L6:K(100000)}, prop:{addr:'220 Orchard Rd, Barrie', val:K(780000), valDate:'2024-06-20', basis:"Broker's opinion", prior:0},
+    coll:{addr:'9 Cedar Lane, Orillia', val:K(420000), valDate:'2025-09-02', basis:'Assessment', prior:K(180000)}, charges:[] },
+  { id:'M-103', borrower:'S. Moreau', pos:'2nd', type:'IO', rate:.10, pd:30, start:'2026-05-30', maturity:'2027-05-29',
+    shares:{L2:K(60000), L5:K(120000)}, prop:{addr:'77 Lakeview Dr, Kingston', val:K(780000), valDate:'2026-04-18', basis:'Appraisal', prior:K(390000)}, coll:null, charges:[] },
+  { id:'M-104', borrower:'T. Nguyen', pos:'2nd', type:'IO', rate:.12, pd:15, start:'2026-01-15', maturity:'2027-01-14',
+    shares:{L3:K(120000)}, prop:{addr:'5 Ridgeway Ave, Oshawa', val:K(640000), valDate:'2025-02-03', basis:'Assessment', prior:K(395000)}, coll:null, charges:[] },
+  { id:'M-105', borrower:'P. Kowalski', pos:'3rd', type:'IO', rate:.13, pd:10, start:'2026-02-10', maturity:'2027-02-09',
+    shares:{L1:K(45000), L5:K(45000)}, prop:{addr:'310 Main St E, Milton', val:K(980000), valDate:'2026-01-22', basis:'Appraisal', prior:K(740000)},
+    coll:{addr:'18 Elm St, Guelph', val:K(510000), valDate:'2026-01-22', basis:'Appraisal', prior:K(300000)},
+    charges:[{ date:'2026-09-18', desc:'Demand letter (legal), recoverable', amt:K(250) }] },
+  { id:'M-106', borrower:'R. & L. Abara', pos:'2nd', type:'IO', rate:.105, pd:1, start:'2026-07-01', maturity:'2027-06-30',
+    shares:{L4:K(100000), L6:K(100000)}, prop:{addr:'42 Sunset Blvd, Whitby', val:K(960000), valDate:'2026-06-10', basis:'Appraisal', prior:K(470000)}, coll:null, charges:[] },
+  { id:'M-107', borrower:'Fairview Developments Ltd.', pos:'1st', type:'IO', rate:.125, pd:20, start:'2026-04-20', maturity:'2027-04-19',
+    shares:{L1:K(250000), L2:K(150000), L4:K(200000), L6:K(150000)}, prop:{addr:'Lot 12, Conc. 4, Caledon', val:K(1600000), valDate:'2026-07-08', basis:'Appraisal', prior:0},
+    coll:{addr:'3 Mill Rd, Bolton', val:K(900000), valDate:'2026-07-08', basis:'Appraisal', prior:K(450000)}, charges:[] },
+  { id:'M-108', borrower:'G. Haddad', pos:'2nd', type:'PI', payment:K(2800), rate:.09, pd:1, start:'2026-06-01', maturity:'2027-05-31',
+    shares:{L2:K(130000), L3:K(130000)}, prop:{addr:'9 Birch Ct, Ajax', val:K(1000000), valDate:'2026-05-14', basis:'Appraisal', prior:K(480000)}, coll:null, charges:[] },
+  { id:'M-109', borrower:'C. Lindqvist', pos:'2nd', type:'IO', rate:.09, pd:25, start:'2026-03-25', maturity:'2027-03-24',
+    shares:{L5:K(50000), L6:K(100000)}, prop:{addr:'66 Harbour St, Collingwood', val:K(820000), valDate:'2026-02-27', basis:'Appraisal', prior:K(450000)}, coll:null, charges:[] },
+  { id:'M-110', borrower:'B. Osei', pos:'2nd', type:'IO', rate:.10, pd:8, start:'2025-09-01', maturity:'2026-08-31',
+    shares:{L1:K(100000), L2:K(100000), L4:K(100000)}, prop:{addr:'12 Queen St N, Brampton', val:K(1350000), valDate:'2024-03-11', basis:"Manager's estimate", prior:K(650000)}, coll:null, charges:[] },
+];
+const SEED = () => [
+  { kind:'payment', id:'p1', m:'M-101', amt:197917, received:'2026-10-01', cleared:'2026-10-01' },
+  { kind:'payment', id:'p2', m:'M-102', amt:458333, received:'2026-10-05', cleared:'2026-10-05' },
+  { kind:'payment', id:'p3', m:'M-104', amt:K(700), received:'2026-10-15', cleared:'2026-10-15' },
+  { kind:'payment', id:'p4', m:'M-105', amt:K(1225), received:'2026-10-10', cleared:'2026-10-10' },
+  { kind:'payment', id:'p5', m:'M-106', amt:K(1750), received:'2026-10-01', cleared:'2026-10-01' },
+  { kind:'reversal', id:'r1', of:'p5', date:'2026-10-06', reason:'NSF — returned by bank' },
+  { kind:'payment', id:'p6', m:'M-107', amt:K(7812.50), received:'2026-10-28', cleared:'2026-11-02' },
+  { kind:'payment', id:'p7', m:'M-108', amt:K(2800), received:'2026-10-01', cleared:'2026-10-01' },
+  { kind:'lenderCost', id:'k1', m:'M-108', date:'2026-10-12', desc:'Insurance premium (lapsed policy)', amt:K(1200) },
+  { kind:'payment', id:'p8', m:'M-109', amt:K(2125), received:'2026-10-25', cleared:'2026-10-25' },
+  { kind:'payment', id:'p9', m:'M-110', amt:K(2500), received:'2026-10-08', cleared:'2026-10-08' },
+];
+let entries = SEED(), seq = 100;
+
+// ===================== calculations (rough, per decided rules) =====================
+const lname = id => LENDERS.find(l => l.id === id).name;
+const principalOf = m => Object.values(m.shares).reduce((a,b) => a+b, 0);
+const days = (a,b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+const months = (a,b) => { const x = new Date(a), y = new Date(b); return (y.getFullYear()-x.getFullYear())*12 + y.getMonth()-x.getMonth(); };
+const $ = c => (c/100).toLocaleString('en-CA', { style:'currency', currency:'CAD' });
+const pct = x => (x*100).toFixed(1) + '%';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// largest remainder; ties -> larger Share, then earlier Lender
+function split(total, shares) {
+  const ids = Object.keys(shares), sum = principalOf({shares});
+  const rows = ids.map((id,i) => { const exact = total * shares[id] / sum; return { id, i, s:shares[id], c:Math.floor(exact), r:exact - Math.floor(exact) }; });
+  let left = total - rows.reduce((a,r) => a + r.c, 0);
+  [...rows].sort((a,b) => b.r - a.r || b.s - a.s || a.i - b.i).slice(0, left).forEach(r => r.c++);
+  return Object.fromEntries(rows.map(r => [r.id, r.c]));
+}
+function dueLines(m) {
+  const lines = m.charges.map(c => ({ k:'charge', label:c.desc, amt:c.amt }));
+  const i = Math.round(principalOf(m) * m.rate / 12);
+  lines.push({ k:'interest', label:`Interest for ${INTEREST_FOR}`, amt:i });
+  if (m.type === 'PI') lines.push({ k:'principal', label:'Principal (blended payment)', amt:m.payment - i });
+  return lines;
+}
+// waterfall: charges -> interest -> fee -> principal (lines are already in that order); surplus is Unapplied
+function applyTo(remaining, amt) {
+  const applied = [], rest = remaining.map(l => ({...l}));
+  let left = amt;
+  for (const l of rest) { const take = Math.min(left, l.amt); if (take > 0) { applied.push({ ...l, amt:take }); l.amt -= take; left -= take; } }
+  return { applied, rest: rest.filter(l => l.amt > 0), unapplied: left };
+}
+function derive() {
+  const reversed = new Set(entries.filter(e => e.kind === 'reversal').map(e => e.of));
+  const allocs = [];
+  const ms = MORTGAGES.map(m => {
+    const P = principalOf(m);
+    let remaining = dueLines(m), unapplied = 0;
+    const pays = entries.filter(e => e.kind === 'payment' && e.m === m.id).sort((a,b) => a.received.localeCompare(b.received)).map(p => {
+      const rev = entries.find(e => e.kind === 'reversal' && e.of === p.id);
+      const view = { ...p, reversal:rev, cleared_ok: p.cleared <= TODAY, applied:[], unapplied:0, allocs:[] };
+      if (rev) return view;
+      const r = applyTo(remaining, p.amt);
+      remaining = r.rest; unapplied += r.unapplied; view.applied = r.applied; view.unapplied = r.unapplied;
+      for (const a of r.applied) for (const [lid, c] of Object.entries(split(a.amt, m.shares))) {
+        const al = { lender:lid, m:m.id, p:p.id, k:a.k, label:a.label, amt:c, cleared:view.cleared_ok };
+        allocs.push(al); view.allocs.push(al);
+      }
+      return view;
+    });
+    const due = dueLines(m).reduce((a,l) => a + l.amt, 0);
+    const dueDate = `2026-10-${String(m.pd).padStart(2,'0')}`;
+    const arrears = dueDate <= TODAY ? remaining.reduce((a,l) => a + l.amt, 0) : 0;
+    const live = pays.filter(p => !p.reversal);
+    let status;
+    if (!live.length) status = pays.some(p => p.reversal) ? 'nsf' : (dueDate > TODAY ? 'upcoming' : 'missing');
+    else if (arrears > 0) status = 'short';
+    else if (live.some(p => !p.cleared_ok)) status = 'uncleared';
+    else if (unapplied > 0) status = 'overpaid';
+    else status = 'paid';
+    const ltvP = (m.prop.prior + P) / m.prop.val;
+    const ltvC = m.coll ? (m.prop.prior + m.coll.prior + P) / (m.prop.val + m.coll.val) : null;
+    const toMat = days(TODAY, m.maturity);
+    const valAge = Math.max(months(m.prop.valDate, TODAY), m.coll ? months(m.coll.valDate, TODAY) : 0);
+    const flags = [];
+    if (toMat < 0) flags.push({ t:'Overholding', d:`matured ${-toMat} days ago`, bad:true });
+    else if (toMat <= 90) flags.push({ t:'Matures soon', d:`in ${toMat} days`, bad:false });
+    if (ltvP > .75 || (ltvC && ltvC > .75)) flags.push({ t:'LTV over 75%', d:pct(Math.max(ltvP, ltvC||0)), bad:true });
+    if (valAge > 24) flags.push({ t:'Stale Valuation', d:`${valAge} months old`, bad:false });
+    return { m, P, pays, due, arrears, unapplied, remaining, status, dueDate, ltvP, ltvC, toMat, valAge, flags,
+             pctOf: id => m.shares[id] / P };
+  });
+  const costs = entries.filter(e => e.kind === 'lenderCost').flatMap(k => {
+    const m = MORTGAGES.find(x => x.id === k.m);
+    return Object.entries(split(k.amt, m.shares)).map(([lender, amt]) => ({ lender, m:k.m, desc:k.desc, date:k.date, amt }));
+  });
+  const payouts = entries.filter(e => e.kind === 'payout');
+  const lenders = LENDERS.map(l => {
+    const mine = allocs.filter(a => a.lender === l.id);
+    const cleared = mine.filter(a => a.cleared).reduce((s,a) => s + a.amt, 0);
+    const held = mine.filter(a => !a.cleared).reduce((s,a) => s + a.amt, 0);
+    const cost = costs.filter(c => c.lender === l.id).reduce((s,c) => s + c.amt, 0);
+    const paid = payouts.filter(p => p.lender === l.id).reduce((s,p) => s + p.amt, 0);
+    const holdings = ms.filter(v => v.m.shares[l.id]).map(v => ({ v, amt:v.m.shares[l.id], pct:v.pctOf(l.id) }));
+    return { l, allocs:mine, cleared, held, cost, costs:costs.filter(c => c.lender === l.id), paid, payouts:payouts.filter(p => p.lender === l.id),
+             owed: cleared - cost - paid, holdings };
+  }).filter(x => x.holdings.length);
+  const P = ms.reduce((a,v) => a + v.P, 0);
+  const book = { P, n:ms.length,
+    wP: ms.reduce((a,v) => a + v.ltvP * v.P, 0) / P,
+    wC: ms.reduce((a,v) => a + (v.ltvC ?? v.ltvP) * v.P, 0) / P,
+    hiP: ms.reduce((a,v) => v.ltvP > a.ltvP ? v : a),
+    due: ms.reduce((a,v) => a + v.due, 0),
+    received: ms.reduce((a,v) => a + v.pays.filter(p => !p.reversal).reduce((s,p) => s + p.amt, 0), 0),
+    arrears: ms.reduce((a,v) => a + v.arrears, 0), unapplied: ms.reduce((a,v) => a + v.unapplied, 0),
+    held: lenders.reduce((a,x) => a + x.held, 0), owed: lenders.reduce((a,x) => a + x.owed, 0) };
+  const exceptions = [];
+  for (const v of ms) {
+    if (v.status === 'nsf') exceptions.push({ v, type:'NSF', text:`${v.m.id} payment reversed (${v.pays.find(p => p.reversal).reversal.reason}); ${$(v.arrears)} now in Arrears.`, act:'record' });
+    if (v.status === 'missing') exceptions.push({ v, type:'Missing', text:`${v.m.id} nothing received; due ${v.dueDate}.`, act:'record' });
+    if (v.status === 'short') exceptions.push({ v, type:'Short', text:`${v.m.id} short by ${$(v.arrears)}; Arrears since ${v.dueDate} (${days(v.dueDate, TODAY)} days).`, act:'record' });
+    if (v.pays.some(p => !p.reversal && !p.cleared_ok)) { const p = v.pays.find(p => !p.reversal && !p.cleared_ok); exceptions.push({ v, type:'Not cleared', text:`${v.m.id} ${$(p.amt)} clears ${p.cleared}; its Allocations can't be Paid Out yet.`, act:'clear', p:p.id }); }
+    if (v.unapplied > 0) exceptions.push({ v, type:'Unapplied', text:`${v.m.borrower} overpaid ${$(v.unapplied)}; held as Unapplied for the Borrower.`, act:null });
+    for (const f of v.flags.filter(f => f.t === 'Overholding')) exceptions.push({ v, type:'Overholding', text:`${v.m.id} ${f.d}; still bearing ${pct(v.m.rate)}.`, act:null });
+  }
+  for (const x of lenders) if (x.costs.length) exceptions.push({ v:null, x, type:'Lender Cost', text:`${x.l.name}: ${$(x.cost)} Lender Cost deducted from what it's owed (${x.costs.map(c => c.desc).join(', ')}).`, act:null });
+  return { ms, lenders, book, exceptions, allocs };
+}
+
+// ===================== actions (append-only) =====================
+function act(kind, d) {
+  if (kind === 'record') entries.push({ kind:'payment', id:'p' + (++seq), m:d.m, amt:d.amt, received:d.received, cleared:d.cleared });
+  if (kind === 'reverse') entries.push({ kind:'reversal', id:'r' + (++seq), of:d.p, date:TODAY, reason:d.reason });
+  if (kind === 'clear') { // modelled as setting the cleared day; a real app would record when, and by whom
+    const p = entries.find(e => e.id === d.p); entries.push({ kind:'clearedDay', id:'c' + (++seq), of:p.id, was:p.cleared, now:TODAY }); p.cleared = TODAY; }
+  if (kind === 'payout') entries.push({ kind:'payout', id:'o' + (++seq), lender:d.lender, amt:d.amt, date:TODAY, method:'EFT' });
+  render();
+}
+
+// ===================== shared bits (forms/preview; layout stays per-variant) =====================
+const chip = s => `<span class="chip c-${s}">${({paid:'Paid',short:'Short',missing:'Missing',nsf:'NSF',uncleared:'Not cleared',overpaid:'Overpaid',upcoming:'Upcoming'})[s]}</span>`;
+function recordForm(v, compact) {
+  const suggest = v.remaining.reduce((a,l) => a + l.amt, 0) || v.due;
+  return `<form data-form="record" data-m="${v.m.id}">
+    <label>Amount <input type="number" step="0.01" name="amt" value="${(suggest/100).toFixed(2)}"></label>
+    <label>Received <input type="date" name="received" value="${TODAY}"></label>
+    <label>Cleared <input type="date" name="cleared" value="${TODAY}"></label>
+    <button class="primary">Record Borrower Payment</button>
+    <div class="preview" data-preview>${previewHtml(v, suggest)}</div></form>`;
+}
+function previewHtml(v, amt) {
+  if (!(amt > 0)) return '<span class="mute">Enter an amount.</span>';
+  const r = applyTo(v.remaining, amt);
+  const by = {};
+  for (const a of r.applied) for (const [lid,c] of Object.entries(split(a.amt, v.m.shares))) by[lid] = (by[lid]||0) + c;
+  return `<b>Applies to</b><table>${r.applied.map(a => `<tr><td>${esc(a.label)}</td><td class="n">${$(a.amt)}</td></tr>`).join('')}
+      ${r.unapplied ? `<tr><td class="warnc">Unapplied (held for ${esc(v.m.borrower)})</td><td class="n warnc">${$(r.unapplied)}</td></tr>` : ''}
+      ${r.rest.length ? `<tr><td class="flag">Still in Arrears</td><td class="n flag">${$(r.rest.reduce((a,l) => a + l.amt, 0))}</td></tr>` : ''}</table>
+    <b>Allocations</b><table>${Object.entries(by).map(([lid,c]) => `<tr><td>${esc(lname(lid))} <span class="mute">${pct(v.pctOf(lid))}</span></td><td class="n">${$(c)}</td></tr>`).join('')}</table>`;
+}
+function payForm(x) {
+  return `<form data-form="payout" data-l="${x.l.id}" style="display:inline-flex;gap:6px;align-items:center">
+    <input type="number" step="0.01" name="amt" value="${(Math.max(0,x.owed)/100).toFixed(2)}">
+    <button class="primary" ${x.owed <= 0 ? 'disabled' : ''}>Confirm Payout</button><span class="err"></span></form>`;
+}
+const sharesText = v => Object.keys(v.m.shares).map(id => `${esc(lname(id))} ${pct(v.pctOf(id))}`).join(' · ');
+const COLORS = ['#1f5f8b','#2a9d8f','#e9a03b','#8e5cc4','#d1495b','#5b8c2a'];
+const lcolor = id => COLORS[LENDERS.findIndex(l => l.id === id)];
+
+// ===================== Variant A: Month sheet =====================
+const uiA = { tab:'month', open:null };
+const VariantA = { name:'Month sheet', render(ctx) {
+  const { ms, lenders, book } = ctx;
+  const tabs = `<nav><a data-a="tab" data-v="month" class="${uiA.tab==='month'?'on':''}">${MONTH_LABEL}</a><a data-a="tab" data-v="port" class="${uiA.tab==='port'?'on':''}">Portfolio</a></nav>`;
+  let body;
+  if (uiA.tab === 'month') {
+    const rows = [...ms].sort((a,b) => a.m.pd - b.m.pd).map(v => {
+      const live = v.pays.filter(p => !p.reversal);
+      const recv = v.pays.map(p => `<div>${p.reversal ? `<s>${$(p.amt)}</s> <span class="flag">${esc(p.reversal.reason)}</span>` : $(p.amt)} <span class="mute small">${p.received.slice(5)}</span></div>`).join('') || '<span class="mute">—</span>';
+      const clr = live.map(p => `<div class="${p.cleared_ok ? '' : 'warnc'}">${p.cleared.slice(5)}</div>`).join('');
+      const acts = `<button data-a="openA" data-v="${v.m.id}">${uiA.open === v.m.id ? 'Close' : 'Record'}</button>` +
+        live.map(p => ` <button class="danger" data-a="reverse" data-v="${p.id}" title="Reverse ${p.id}">NSF</button>`).join('');
+      return `<tr><td>${v.m.pd}</td><td><b>${v.m.id}</b></td><td>${esc(v.m.borrower)}${v.flags.some(f=>f.t==='Overholding') ? ' <span class="flag small">Overholding</span>' : ''}</td>
+        <td class="n">${$(v.due)}</td><td class="n">${recv}</td><td>${clr}</td><td>${chip(v.status)}${v.arrears ? `<div class="flag small">Arrears ${$(v.arrears)}</div>` : ''}${v.unapplied ? `<div class="warnc small">Unapplied ${$(v.unapplied)}</div>` : ''}</td><td class="noprint">${acts}</td></tr>
+        ${uiA.open === v.m.id ? `<tr class="expand"><td></td><td colspan="7">${recordForm(v)}</td></tr>` : ''}`;
+    }).join('');
+    const prow = lenders.map(x => `<tr><td>${esc(x.l.name)}${x.l.note ? ` <span class="mute small">${esc(x.l.note)}</span>` : ''}</td>
+      <td class="n">${$(x.cleared)}</td><td class="n" style="color:var(--hold)">${x.held ? $(x.held) : '—'}</td><td class="n">${x.cost ? '−' + $(x.cost) : '—'}</td>
+      <td class="n">${x.paid ? $(x.paid) : '—'}</td><td class="n"><b class="${x.owed < 0 ? 'flag' : ''}">${$(x.owed)}</b></td><td class="noprint">${payForm(x)}</td></tr>`).join('');
+    body = `<div class="strip"><div>Due<b>${$(book.due)}</b></div><div>Received<b>${$(book.received)}</b></div><div>Arrears<b class="flag">${$(book.arrears)}</b></div>
+        <div>Unapplied<b class="warnc">${$(book.unapplied)}</b></div><div>Held (not cleared)<b style="color:var(--hold)">${$(book.held)}</b></div><div>Owed to Lenders<b>${$(book.owed)}</b></div></div>
+      <section><h2>Borrower Payments</h2><table><tr><th>Day</th><th>Mortgage</th><th>Borrower</th><th class="n">Due</th><th class="n">Received</th><th>Cleared</th><th>Status</th><th class="noprint"></th></tr>${rows}</table></section>
+      <section><h2>Payouts</h2><p class="mute small">Owed = Allocations from Cleared payments − Lender Costs − Payouts already made. Held amounts become payable once cleared.</p>
+        <table><tr><th>Lender</th><th class="n">Allocated (cleared)</th><th class="n">Held</th><th class="n">Lender Costs</th><th class="n">Paid Out</th><th class="n">Owed</th><th class="noprint">Pay</th></tr>${prow}</table></section>`;
+  } else {
+    const rows = ms.map(v => `<tr><td><b>${v.m.id}</b></td><td>${esc(v.m.borrower)}<div class="mute small">${esc(v.m.prop.addr)}</div></td><td>${v.m.pos}</td><td>${v.m.type === 'PI' ? 'P&amp;I' : 'Int-only'}</td>
+      <td class="n">${pct(v.m.rate)}</td><td>${v.m.start} → ${v.m.maturity}<div class="small ${v.toMat < 0 ? 'flag' : v.toMat <= 90 ? 'warnc' : 'mute'}">${v.toMat < 0 ? `Overholding ${-v.toMat}d` : `${v.toMat} days left`}</div></td>
+      <td class="n">${$(v.P)}</td><td class="small">${sharesText(v)}</td>
+      <td class="small">${$(v.m.prop.val)}<div class="${v.valAge > 24 ? 'warnc' : 'mute'}">${esc(v.m.prop.basis)}, ${v.m.prop.valDate}</div></td>
+      <td class="n ${v.ltvP > .75 ? 'flag' : ''}">${pct(v.ltvP)}</td><td class="n ${v.ltvC > .75 ? 'flag' : ''}">${v.ltvC ? pct(v.ltvC) : '—'}</td></tr>`).join('');
+    body = `<h2>Portfolio</h2><table><tr><th>Mortgage</th><th>Borrower / property</th><th>Pos</th><th>Type</th><th class="n">Rate</th><th>Term</th><th class="n">Principal</th><th>Shares</th><th>Valuation</th><th class="n">LTV</th><th class="n">LTV w/ Collateral</th></tr>${rows}
+      <tr><th colspan="6">Book: ${book.n} Mortgages</th><th class="n">${$(book.P)}</th><th colspan="2">Weighted avg · highest ${book.hiP.m.id}</th><th class="n">${pct(book.wP)} · ${pct(book.hiP.ltvP)}</th><th class="n">${pct(book.wC)}</th></tr></table>`;
+  }
+  return `<div class="A"><header><h1>PM Manager</h1>${tabs}</header><div class="wrap">${body}</div></div>`;
+}};
+
+// ===================== Variant B: Pipeline =====================
+const uiB = { step:'receive', sel:null };
+const VariantB = { name:'Pipeline', render(ctx) {
+  const { ms, lenders, book, exceptions } = ctx;
+  const nExc = exceptions.length;
+  const step = (k, t, c) => `<a data-a="step" data-v="${k}" class="${uiB.step===k?'on':''}">${t}${c ? `<span class="cnt">${c}</span>` : ''}</a>`;
+  const top = `<div class="top"><b>PM Manager · ${MONTH_LABEL} run</b><div class="steps">${step('receive','1 · Receive')}${step('resolve','2 · Resolve', nExc)}${step('pay','3 · Pay Lenders')}</div>
+    <div style="flex:1"></div><div class="steps">${step('port','Portfolio')}</div></div>`;
+  let body = '';
+  if (uiB.step === 'receive') {
+    const order = { missing:0, nsf:1, short:2, upcoming:3, uncleared:4, overpaid:5, paid:6 };
+    const sel = ms.find(v => v.m.id === uiB.sel) || [...ms].sort((a,b) => order[a.status] - order[b.status])[0];
+    const q = [...ms].sort((a,b) => order[a.status] - order[b.status] || a.m.pd - b.m.pd).map(v => `<div class="item s-${v.status} ${v === sel ? 'sel' : ''}" data-a="selB" data-v="${v.m.id}">
+      <div><b>${v.m.id}</b> ${esc(v.m.borrower)}<div class="mute small">Day ${v.m.pd} · due ${$(v.due)}</div></div><div style="text-align:right">${chip(v.status)}<div class="small">${$(v.pays.filter(p=>!p.reversal).reduce((a,p)=>a+p.amt,0))} in</div></div></div>`).join('');
+    const totalDue = sel.due, segs = [];
+    for (const p of sel.pays.filter(p => !p.reversal)) for (const a of p.applied) segs.push({ w:a.amt/totalDue, c:a.k === 'charge' ? '#e9a03b' : a.k === 'principal' ? '#2a9d8f' : '#1f5f8b', t:a.k });
+    const bar = `<div class="bar">${segs.map(s => `<span style="width:${Math.min(100,s.w*100)}%;background:${s.c}">${s.t}</span>`).join('')}</div>`;
+    body = `<div class="split"><div class="queue"><h2>Expected this month</h2><p class="mute small">Exceptions first. Click a Mortgage to record against it.</p>${q}</div>
+      <div class="panel"><h2>${sel.m.id} · ${esc(sel.m.borrower)}</h2><div class="mute small">${sharesText(sel)}</div>
+        <div style="margin-top:8px">Paid so far vs due ${$(sel.due)}</div>${bar}
+        ${sel.pays.map(p => `<div class="small">${p.id}: ${$(p.amt)} rec'd ${p.received}, clears ${p.cleared} ${p.reversal ? `<span class="flag">reversed: ${esc(p.reversal.reason)}</span>` : `<button class="danger" data-a="reverse" data-v="${p.id}">Record NSF</button>`}</div>`).join('')}
+        <h3 style="margin-top:14px">Record Borrower Payment</h3>${recordForm(sel)}</div></div>`;
+  } else if (uiB.step === 'resolve') {
+    const groups = {};
+    exceptions.forEach(e => (groups[e.type] = groups[e.type] || []).push(e));
+    body = `<h2>Resolve before paying Lenders</h2><p class="mute">Nothing here blocks Payouts except what it says; it's the list to look at before you confirm.</p>` +
+      Object.entries(groups).map(([t, es]) => `<h3>${t} (${es.length})</h3>` + es.map(e => `<div class="exc"><div>${esc(e.text)}</div><div>
+        ${e.act === 'record' ? `<button data-a="gorecord" data-v="${e.v.m.id}">Record payment →</button>` : ''}
+        ${e.act === 'clear' ? `<button data-a="clear" data-v="${e.p}">Mark cleared today</button>` : ''}</div></div>`).join('')).join('') || '<p>Nothing to resolve.</p>';
+  } else if (uiB.step === 'pay') {
+    body = `<h2>Pay Lenders</h2><p class="mute small">One remittance slip per Lender (prints as its own page). Only Cleared Allocations are included.</p><div class="slips">` + lenders.map(x => {
+      const byM = {};
+      for (const a of x.allocs) { const r = byM[a.m] = byM[a.m] || { c:0, h:0 }; a.cleared ? r.c += a.amt : r.h += a.amt; }
+      return `<div class="slip"><div style="display:flex;justify-content:space-between"><b>${esc(x.l.name)}</b><span class="mute small">${MONTH_LABEL}</span></div>${x.l.note ? `<div class="mute small">${esc(x.l.note)}</div>` : ''}
+        <table><tr><th>Mortgage</th><th class="n">Share</th><th class="n">Allocated</th></tr>
+        ${x.holdings.map(h => { const r = byM[h.v.m.id] || { c:0, h:0 }; return `<tr><td>${h.v.m.id}</td><td class="n">${pct(h.pct)}</td><td class="n">${$(r.c)}${r.h ? `<div class="small" style="color:var(--hold)">+${$(r.h)} held</div>` : ''}${!r.c && !r.h ? `<div class="small flag">${h.v.status === 'upcoming' ? 'not yet due' : 'nothing received'}</div>` : ''}</td></tr>`; }).join('')}
+        ${x.costs.map(c => `<tr><td colspan="2">Lender Cost: ${esc(c.desc)} (${c.m})</td><td class="n">−${$(c.amt)}</td></tr>`).join('')}
+        ${x.payouts.map(p => `<tr><td colspan="2">Paid Out ${p.date} (${p.method})</td><td class="n">−${$(p.amt)}</td></tr>`).join('')}
+        <tr class="tot"><td colspan="2">Owed</td><td class="n">${$(x.owed)}</td></tr></table><div style="margin-top:8px">${payForm(x)}</div></div>`;
+    }).join('') + '</div>';
+  } else {
+    const buckets = [['Overholding', v => v.toMat < 0], ['Matures within 90 days', v => v.toMat >= 0 && v.toMat <= 90], ['Later', v => v.toMat > 90]];
+    const ltvbar = (label, x) => `<div class="small">${label} <b class="${x > .75 ? 'flag' : ''}">${pct(x)}</b></div><div class="ltvbar"><i class="${x > .75 ? 'hi' : ''}" style="width:${Math.min(100, x*100)}%"></i><b></b></div>`;
+    body = `<h2>Portfolio</h2><p class="mute">${book.n} Mortgages · ${$(book.P)} · weighted LTV ${pct(book.wP)} (${pct(book.wC)} with Collateral) · highest ${book.hiP.m.id} ${pct(book.hiP.ltvP)}</p>` +
+      buckets.map(([t, f]) => { const vs = ms.filter(f).sort((a,b) => a.toMat - b.toMat); return vs.length ? `<div class="bucket"><h3>${t}</h3>` + vs.map(v => `<div class="mrow">
+        <div><b>${v.m.id}</b> ${esc(v.m.borrower)}<div class="mute small">${v.m.pos} · ${v.m.type === 'PI' ? 'P&amp;I' : 'Int-only'} · ${pct(v.m.rate)} · matures ${v.m.maturity}</div>
+          ${v.flags.map(f => `<div class="small ${f.bad ? 'flag' : 'warnc'}">${f.t}: ${f.d}</div>`).join('')}</div>
+        <div><div class="small">${$(v.P)} principal</div><div class="bar">${Object.keys(v.m.shares).map(id => `<span style="width:${v.pctOf(id)*100}%;background:${lcolor(id)}" title="${esc(lname(id))}">${esc(lname(id))}</span>`).join('')}</div></div>
+        <div>${ltvbar('LTV', v.ltvP)}${v.ltvC ? ltvbar('with Collateral', v.ltvC) : '<div class="small mute">No Collateral</div>'}</div></div>`).join('') + '</div>' : ''; }).join('');
+  }
+  return `<div class="B">${top}<div class="wrap">${body}</div></div>`;
+}};
+
+// ===================== Variant C: Mortgage file =====================
+const uiC = { list:'m', sel:'M-104' };
+const VariantC = { name:'Mortgage file', render(ctx) {
+  const { ms, lenders, book } = ctx;
+  const dotc = { paid:'var(--ok)', short:'var(--bad)', missing:'var(--bad)', nsf:'var(--bad)', uncleared:'var(--hold)', overpaid:'var(--warn)', upcoming:'#c3cad3' };
+  const list = uiC.list === 'm'
+    ? ms.map(v => `<div class="li ${uiC.sel === v.m.id ? 'sel' : ''}" data-a="selC" data-v="${v.m.id}"><span class="dot" style="background:${dotc[v.status]}"></span>
+        <div style="flex:1"><b>${v.m.id}</b> ${esc(v.m.borrower)}<div class="small mute">${$(v.P)} · LTV ${pct(v.ltvP)} · day ${v.m.pd}</div>
+        ${v.flags.map(f => `<div class="small ${f.bad ? 'flag' : 'warnc'}">${f.t}</div>`).join('')}</div></div>`).join('')
+    : lenders.map(x => `<div class="li ${uiC.sel === x.l.id ? 'sel' : ''}" data-a="selC" data-v="${x.l.id}"><span class="dot" style="background:${x.owed > 0 ? 'var(--accent)' : '#c3cad3'}"></span>
+        <div style="flex:1"><b>${esc(x.l.name)}</b><div class="small mute">owed ${$(x.owed)}${x.held ? ` · ${$(x.held)} held` : ''}</div></div></div>`).join('');
+  const aside = `<aside><h1>PM Manager</h1><div class="book"><b>${MONTH_LABEL}</b><br>Due ${$(book.due)} · in ${$(book.received)}<br><span class="flag">Arrears ${$(book.arrears)}</span> · owed to Lenders ${$(book.owed)}<br>
+      Book ${$(book.P)} · LTV ${pct(book.wP)} avg / ${pct(book.wC)} w/ Coll · max ${pct(book.hiP.ltvP)}</div>
+    <div class="tog"><button data-a="listC" data-v="m" class="${uiC.list==='m'?'on':''}">Mortgages</button><button data-a="listC" data-v="l" class="${uiC.list==='l'?'on':''}">Lenders</button></div>${list}</aside>`;
+  let main;
+  const v = ms.find(v => v.m.id === uiC.sel), x = lenders.find(x => x.l.id === uiC.sel);
+  if (v) {
+    const prop = (p, t) => `<div><b>${t}</b> ${esc(p.addr)}<div class="small">Valuation ${$(p.val)} <span class="${months(p.valDate, TODAY) > 24 ? 'warnc' : 'mute'}">(${esc(p.basis)}, ${p.valDate})</span></div><div class="small">Prior Charges ${$(p.prior)}</div></div>`;
+    main = `<h1>${v.m.id} · ${esc(v.m.borrower)} ${chip(v.status)}</h1><div class="mute">${v.m.pos} mortgage · ${v.m.type === 'PI' ? `P&amp;I, ${$(v.m.payment)}/month` : 'interest-only'}</div>
+      <div class="facts"><div>Principal<b>${$(v.P)}</b></div><div>Term<b>${pct(v.m.rate)} · day ${v.m.pd}</b><span class="small mute">${v.m.start} → ${v.m.maturity}</span></div>
+        <div>Maturity<b class="${v.toMat < 0 ? 'flag' : v.toMat <= 90 ? 'warnc' : ''}">${v.toMat < 0 ? `Overholding ${-v.toMat}d` : `${v.toMat} days`}</b></div>
+        <div>LTV / w Collateral<b class="${Math.max(v.ltvP, v.ltvC||0) > .75 ? 'flag' : ''}">${pct(v.ltvP)} / ${v.ltvC ? pct(v.ltvC) : '—'}</b></div></div>
+      <div class="cols"><div class="box"><h3>Shares</h3><table>${Object.keys(v.m.shares).map(id => `<tr><td>${esc(lname(id))}</td><td class="n">${$(v.m.shares[id])}</td><td class="n">${pct(v.pctOf(id))}</td></tr>`).join('')}</table></div>
+        <div class="box"><h3>Security</h3>${prop(v.m.prop, 'Primary')}${v.m.coll ? '<hr>' + prop(v.m.coll, 'Collateral') : ''}</div></div>
+      <div class="box"><h3>${MONTH_LABEL}</h3><table>
+        ${dueLines(v.m).map(l => `<tr><td>Due ${v.dueDate}: ${esc(l.label)}</td><td class="n">${$(l.amt)}</td><td></td></tr>`).join('')}
+        ${v.pays.map(p => `<tr><td>${p.reversal ? '<s>' : ''}Borrower Payment ${p.received} (clears ${p.cleared})${p.reversal ? '</s>' : ''}
+            ${p.reversal ? `<div class="flag small">Reversed ${p.reversal.date}: ${esc(p.reversal.reason)}</div>` : `<div class="small mute">${p.allocs.length ? p.allocs.map(a => `${esc(lname(a.lender))} ${$(a.amt)} ${a.k}`).join(' · ') : ''}${p.unapplied ? ` · Unapplied ${$(p.unapplied)}` : ''}</div>`}</td>
+          <td class="n">${$(p.amt)}</td><td class="noprint">${p.reversal ? '' : `<button class="danger" data-a="reverse" data-v="${p.id}">NSF</button>${p.cleared_ok ? '' : ` <button data-a="clear" data-v="${p.id}">Cleared</button>`}`}</td></tr>`).join('')}
+        <tr><td><b>Arrears</b></td><td class="n ${v.arrears ? 'flag' : ''}"><b>${$(v.arrears)}</b></td><td></td></tr></table>
+        <h3 style="margin-top:12px">Record Borrower Payment</h3>${recordForm(v)}</div>`;
+  } else if (x) {
+    const byM = {};
+    for (const a of x.allocs) (byM[a.m] = byM[a.m] || []).push(a);
+    main = `<h1>${esc(x.l.name)}</h1>${x.l.note ? `<div class="mute">${esc(x.l.note)}</div>` : ''}
+      <div class="facts"><div>Allocated (cleared)<b>${$(x.cleared)}</b></div><div>Held<b style="color:var(--hold)">${$(x.held)}</b></div><div>Lender Costs<b>${$(x.cost)}</b></div><div>Owed<b>${$(x.owed)}</b></div></div>
+      <div class="box"><h3>Shares and ${MONTH_LABEL} Allocations</h3><table><tr><th>Mortgage</th><th class="n">Share</th><th>Allocations</th><th class="n">Total</th></tr>
+        ${x.holdings.map(h => { const as = byM[h.v.m.id] || []; return `<tr><td><a href="#" data-a="gotoM" data-v="${h.v.m.id}">${h.v.m.id}</a> ${chip(h.v.status)}</td><td class="n">${$(h.amt)} · ${pct(h.pct)}</td>
+          <td class="small">${as.map(a => `<span style="${a.cleared ? '' : 'color:var(--hold)'}">${a.k} ${$(a.amt)}${a.cleared ? '' : ' (held)'}</span>`).join(' · ') || '<span class="mute">none</span>'}</td><td class="n">${$(as.reduce((s,a) => s + a.amt, 0))}</td></tr>`; }).join('')}</table></div>
+      ${x.costs.length ? `<div class="box"><h3>Lender Costs</h3><table>${x.costs.map(c => `<tr><td>${c.date} ${esc(c.desc)} (${c.m})</td><td class="n">−${$(c.amt)}</td></tr>`).join('')}</table></div>` : ''}
+      <div class="box"><h3>Payouts</h3>${x.payouts.map(p => `<div>${p.date} ${$(p.amt)} (${p.method})</div>`).join('') || '<div class="mute">None yet this month.</div>'}<div style="margin-top:8px">${payForm(x)}</div></div>`;
+  } else main = '<p class="mute">Pick something on the left.</p>';
+  return `<div class="C">${aside}<main>${main}</main></div>`;
+}};
+
+// ===================== switcher + wiring =====================
+const VARIANTS = { A:VariantA, B:VariantB, C:VariantC }, KEYS = Object.keys(VARIANTS);
+const cur = () => { const v = new URLSearchParams(location.search).get('variant'); return KEYS.includes(v) ? v : 'A'; };
+function go(delta) { const i = (KEYS.indexOf(cur()) + delta + KEYS.length) % KEYS.length; const u = new URL(location); u.searchParams.set('variant', KEYS[i]); history.replaceState(null, '', u); render(); }
+function render() {
+  const ctx = derive(), k = cur();
+  document.getElementById('root').innerHTML = VARIANTS[k].render(ctx);
+  document.getElementById('vlabel').textContent = `${k} (${VARIANTS[k].name})`;
+  document.getElementById('statepanel').textContent = entries.map(e => JSON.stringify(e)).join('\n') + '\n\n— derived per Lender —\n' +
+    ctx.lenders.map(x => `${x.l.name}: cleared ${$(x.cleared)} held ${$(x.held)} costs ${$(x.cost)} paid ${$(x.paid)} owed ${$(x.owed)}`).join('\n');
+}
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('statebtn').onclick = () => { const p = document.getElementById('statepanel'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; };
+document.getElementById('resetbtn').onclick = () => { entries = SEED(); render(); };
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1);
+});
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-a]'); if (!t) return;
+  const a = t.dataset.a, v = t.dataset.v;
+  if (a !== 'reverse' && a !== 'clear') e.preventDefault();
+  if (a === 'tab') uiA.tab = v;
+  if (a === 'openA') uiA.open = uiA.open === v ? null : v;
+  if (a === 'step') uiB.step = v;
+  if (a === 'selB') uiB.sel = v;
+  if (a === 'gorecord') { uiB.step = 'receive'; uiB.sel = v; }
+  if (a === 'listC') { uiC.list = v; uiC.sel = v === 'm' ? MORTGAGES[0].id : LENDERS[0].id; }
+  if (a === 'selC') uiC.sel = v;
+  if (a === 'gotoM') { uiC.list = 'm'; uiC.sel = v; }
+  if (a === 'reverse') { const reason = prompt('Reversal reason', 'NSF — returned by bank'); if (reason) return act('reverse', { p:v, reason }); return; }
+  if (a === 'clear') return act('clear', { p:v });
+  render();
+});
+document.addEventListener('input', e => {
+  const f = e.target.closest('form[data-form="record"]'); if (!f) return;
+  const v = derive().ms.find(v => v.m.id === f.dataset.m);
+  f.querySelector('[data-preview]').innerHTML = previewHtml(v, Math.round(parseFloat(f.amt.value) * 100));
+});
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.dataset.form === 'record') {
+    const amt = Math.round(parseFloat(f.amt.value) * 100); if (!(amt > 0)) return;
+    uiA.open = null;
+    act('record', { m:f.dataset.m, amt, received:f.received.value, cleared:f.cleared.value || f.received.value });
+  }
+  if (f.dataset.form === 'payout') {
+    const x = derive().lenders.find(x => x.l.id === f.dataset.l), amt = Math.round(parseFloat(f.amt.value) * 100);
+    if (!(amt > 0) || amt > x.owed) { f.querySelector('.err').textContent = `Can't exceed ${$(Math.max(0, x.owed))} owed`; return; }
+    act('payout', { lender:x.l.id, amt });
+  }
+});
+render();
+</script>
+</body>
+</html>
