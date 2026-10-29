@@ -90,6 +90,10 @@ _Avoid_: Penalty, add-on, disbursement
 A cost paid to a third party to protect a Mortgage, borne by its Lenders by Share or by named Lenders, and funded by their contributions or deducted from what they are owed.
 _Avoid_: Expense, deduction, disbursement
 
+**Cleared**:
+A Borrower Payment is cleared once its money is available in the bank account, on the day it is received unless the Manager sets a later day. Only Allocations from cleared Borrower Payments can be Paid Out.
+_Avoid_: Settled, posted, available
+
 **Unapplied**:
 Money received from a Borrower that isn't yet applied to anything the Borrower owes, such as an overpayment or money left for future principal, held for that Borrower until it is applied to any of their Mortgages or refunded.
 _Avoid_: Suspense, credit balance
@@ -119,6 +123,10 @@ _Avoid_: Distribution, cash out
 **Lender Statement**:
 An account to one Lender, for a chosen period, of its Shares, Allocations, Waivers, Lender Costs and Payouts across every Mortgage it holds, with what it is still owed. Over a calendar year it is the year-end statement.
 _Avoid_: Investor report, remittance advice
+
+**Reconciliation**:
+A dated comparison of the bank statement for a period with the Mortgage money recorded over it. What the statement shows beyond that money is left unreconciled as Non-Mortgage credits and debits. It also checks the bank holds at least the Mortgage money held for Borrowers and Lenders.
+_Avoid_: Bank rec, trust rec, principal reconciliation
 
 **Income Report**:
 Every Lender's interest and Lender's Fee for a calendar year, per Mortgage, dated by Allocation, for an accountant to prepare tax slips from. It informs filing; it is not a slip.
