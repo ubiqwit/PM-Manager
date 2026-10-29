@@ -113,3 +113,13 @@ _Avoid_: Distribution, split
 **Payout**:
 Money the Manager actually pays a Lender, settling one or more Allocations; it may be later than, or less than, what the Lender is owed.
 _Avoid_: Distribution, cash out
+
+## Reporting
+
+**Lender Statement**:
+An account to one Lender, for a chosen period, of its Shares, Allocations, Waivers, Lender Costs and Payouts across every Mortgage it holds, with what it is still owed. Over a calendar year it is the year-end statement.
+_Avoid_: Investor report, remittance advice
+
+**Income Report**:
+Every Lender's interest and Lender's Fee for a calendar year, per Mortgage, dated by Allocation, for an accountant to prepare tax slips from. It informs filing; it is not a slip.
+_Avoid_: T5 worksheet, tax report
