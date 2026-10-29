@@ -91,7 +91,7 @@ A cost paid to a third party to protect a Mortgage, borne by its Lenders by Shar
 _Avoid_: Expense, deduction, disbursement
 
 **Unapplied**:
-Money received on a Mortgage that isn't yet applied to anything the Borrower owes, such as an overpayment, held until it is applied or refunded.
+Money received from a Borrower that isn't yet applied to anything the Borrower owes, such as an overpayment or money left for future principal, held for that Borrower until it is applied to any of their Mortgages or refunded.
 _Avoid_: Suspense, credit balance
 
 **Arrears**:
